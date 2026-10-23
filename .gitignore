@@ -1,0 +1,8 @@
+.DS_Store
+/.codex-tmp/
+/.qtcreator/
+/build/
+dist/
+logs/
+known_hosts
+*.pro.user*

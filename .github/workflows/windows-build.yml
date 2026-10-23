@@ -1,0 +1,262 @@
+name: Build SerialSshLogger for Windows
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: serialsshlogger-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      LIBSSH_ROOT: ${{ github.workspace }}\lib\windows-x64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Qt 5.15.2 and MinGW 8.1
+        uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: '5.15.2'
+          arch: win64_mingw81
+          tools: tools_mingw,qt.tools.win64_mingw810
+          cache: true
+
+      - name: Set up Python for SSH integration tests
+        id: python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: x64
+
+      - name: Verify toolchain
+        run: |
+          $ErrorActionPreference = "Stop"
+          qmake -v
+          if ($LASTEXITCODE -ne 0) { throw "qmake was not found or failed." }
+          g++ --version
+          if ($LASTEXITCODE -ne 0) { throw "g++ was not found or failed." }
+          mingw32-make --version
+          if ($LASTEXITCODE -ne 0) { throw "mingw32-make was not found or failed." }
+
+      - name: Build release executable
+        run: |
+          $ErrorActionPreference = "Stop"
+          $buildDir = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\windows-build"
+          $project = Join-Path $env:GITHUB_WORKSPACE "SerialSshLogger.pro"
+          New-Item -ItemType Directory -Force $buildDir | Out-Null
+          Push-Location $buildDir
+          try {
+            qmake $project -spec win32-g++ "CONFIG+=release" "CONFIG-=debug" "LIBSSH_ROOT=$env:LIBSSH_ROOT"
+            if ($LASTEXITCODE -ne 0) { throw "Application qmake failed." }
+            mingw32-make -j2 release
+            if ($LASTEXITCODE -ne 0) { throw "Application build failed." }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Install SSH test dependencies
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dependencyDir = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\python-deps"
+          $tempDir = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\pip-temp"
+          New-Item -ItemType Directory -Force $tempDir | Out-Null
+          $env:TEMP = $tempDir
+          $env:TMP = $tempDir
+          python -m pip install --disable-pip-version-check --no-cache-dir --target $dependencyDir "paramiko==5.1.0"
+          if ($LASTEXITCODE -ne 0) { throw "SSH test dependency installation failed." }
+
+      - name: Build tests
+        run: |
+          $ErrorActionPreference = "Stop"
+          $testBuildDir = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\windows-tests"
+          $project = Join-Path $env:GITHUB_WORKSPACE "tests\tests.pro"
+          New-Item -ItemType Directory -Force $testBuildDir | Out-Null
+          Push-Location $testBuildDir
+          try {
+            qmake $project -spec win32-g++ "CONFIG+=release" "CONFIG-=debug" "LIBSSH_ROOT=$env:LIBSSH_ROOT"
+            if ($LASTEXITCODE -ne 0) { throw "Test qmake failed." }
+            mingw32-make -j2 release
+            if ($LASTEXITCODE -ne 0) { throw "Test build failed." }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Run tests with loopback SSH server
+        env:
+          LOGGER_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PATH = "$env:LIBSSH_ROOT\bin;$env:QT_ROOT_DIR\bin;$env:PATH"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:QT_PLUGIN_PATH = Join-Path $env:QT_ROOT_DIR "plugins"
+          $env:PYTHONPATH = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\python-deps"
+          $env:PYTHONDONTWRITEBYTECODE = "1"
+          $env:LOGGER_TEST_ROOT = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\test-results"
+          $env:LOGGER_SSH_FIXTURE = Join-Path $env:GITHUB_WORKSPACE "tests\ssh_fixture.py"
+          New-Item -ItemType Directory -Force $env:LOGGER_TEST_ROOT | Out-Null
+          $testExe = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\windows-tests\release\logger_tests.exe"
+          $testReport = Join-Path $env:LOGGER_TEST_ROOT "results.xml"
+          & $testExe -o "$testReport,xml" -o "-,txt"
+          if ($LASTEXITCODE -ne 0) { throw "Logger tests failed with exit code $LASTEXITCODE." }
+
+      - name: Package Windows application
+        run: |
+          $ErrorActionPreference = "Stop"
+          $deployDir = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\package\SerialSshLogger-Windows-x64"
+          $exePath = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\windows-build\release\SerialSshLogger.exe"
+          if (!(Test-Path $exePath)) { throw "Application executable not found: $exePath" }
+          New-Item -ItemType Directory -Force $deployDir | Out-Null
+          $deployedExe = Join-Path $deployDir "SerialSshLogger.exe"
+          Copy-Item $exePath $deployedExe
+
+          $windeployqt = Join-Path $env:QT_ROOT_DIR "bin\windeployqt.exe"
+          & $windeployqt --compiler-runtime --dir $deployDir $deployedExe
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE." }
+          Copy-Item (Join-Path $env:LIBSSH_ROOT "bin\*.dll") $deployDir -Force
+          Copy-Item (Join-Path $env:LIBSSH_ROOT "licenses") $deployDir -Recurse
+
+          $requiredFiles = @(
+            "SerialSshLogger.exe",
+            "Qt5Core.dll",
+            "Qt5Gui.dll",
+            "Qt5Widgets.dll",
+            "Qt5SerialPort.dll",
+            "platforms\qwindows.dll",
+            "libgcc_s_seh-1.dll",
+            "libstdc++-6.dll",
+            "libwinpthread-1.dll",
+            "libssh.dll",
+            "libcrypto-3-x64.dll",
+            "zlib1.dll"
+          )
+          foreach ($file in $requiredFiles) {
+            $path = Join-Path $deployDir $file
+            if (!(Test-Path $path -PathType Leaf)) { throw "Required runtime file is missing: $path" }
+          }
+          Get-ChildItem $deployDir -Recurse
+
+      - name: Upload Windows package
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: SerialSshLogger-Windows-x64
+          path: .codex-tmp/package/
+          include-hidden-files: true
+          if-no-files-found: error
+          overwrite: true
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Download Windows package
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build-windows.outputs.artifact-id }}
+          merge-multiple: true
+          path: .codex-tmp/release-package
+
+      - name: Create release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/.codex-tmp/release-package"
+          zip -r "$GITHUB_WORKSPACE/.codex-tmp/SerialSshLogger-Windows-x64.zip" SerialSshLogger-Windows-x64
+          cp SerialSshLogger-Windows-x64/SerialSshLogger.exe "$GITHUB_WORKSPACE/.codex-tmp/SerialSshLogger.exe"
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v1.0.${GITHUB_RUN_NUMBER}"
+          archive="$GITHUB_WORKSPACE/.codex-tmp/SerialSshLogger-Windows-x64.zip"
+          executable="$GITHUB_WORKSPACE/.codex-tmp/SerialSshLogger.exe"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "$archive" "$executable" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" "$archive" "$executable" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --generate-notes \
+              --title "SerialSshLogger $tag"
+          fi
+
+  cleanup-artifacts:
+    if: >-
+      always() &&
+      github.event_name != 'pull_request' &&
+      needs.build-windows.result == 'success' &&
+      (needs.release.result == 'success' || needs.release.result == 'skipped')
+    needs:
+      - build-windows
+      - release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+
+    steps:
+      - name: Keep only the latest Windows artifact
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const artifactName = 'SerialSshLogger-Windows-x64';
+            const artifacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: artifactName,
+                per_page: 100
+              }
+            );
+            const activeArtifacts = artifacts
+              .filter(artifact => artifact.name === artifactName && !artifact.expired)
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            for (const artifact of activeArtifacts.slice(1)) {
+              if (artifact.workflow_run.id !== context.runId) {
+                const { data: run } = await github.rest.actions.getWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: artifact.workflow_run.id
+                });
+                if (run.status !== 'completed') {
+                  core.info(`Keeping artifact ${artifact.id} while its workflow is running.`);
+                  continue;
+                }
+              }
+              core.info(`Deleting artifact ${artifact.id}: ${artifact.name}`);
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id
+              });
+            }

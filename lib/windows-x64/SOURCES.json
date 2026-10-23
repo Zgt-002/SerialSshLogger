@@ -1,0 +1,54 @@
+{
+  "platform": "Windows x86_64",
+  "toolchain": "MinGW-w64 (MSYS2 mingw64, MSVCRT)",
+  "packages": [
+    {
+      "name": "libssh",
+      "version": "0.12.2-1",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libssh-0.12.2-1-any.pkg.tar.zst",
+      "package_page": "https://packages.msys2.org/packages/mingw-w64-x86_64-libssh",
+      "sha256": "6ad2f503998fcbccc49d1203cc6d59afd420da592268460e46b191c362646503"
+    },
+    {
+      "name": "openssl",
+      "version": "3.6.5-1",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-openssl-3.6.5-1-any.pkg.tar.zst",
+      "package_page": "https://packages.msys2.org/packages/mingw-w64-x86_64-openssl",
+      "sha256": "389d1af21e99223d9e2cd32d4c073131b276da85be7636bd8d23571f6938864f"
+    },
+    {
+      "name": "libwinpthread",
+      "version": "14.0.0.r495.g63ebe6cdb-2",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libwinpthread-14.0.0.r495.g63ebe6cdb-2-any.pkg.tar.zst",
+      "package_page": "https://packages.msys2.org/packages/mingw-w64-x86_64-libwinpthread",
+      "sha256": "e657ade501916ef2f0ff8b5f5d93dc65d39f1a0ec66cfee8206026b240f60518"
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.2-2",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-zlib-1.3.2-2-any.pkg.tar.zst",
+      "package_page": "https://packages.msys2.org/packages/mingw-w64-x86_64-zlib",
+      "sha256": "9e75842a070ba648e986e12424e1c92c9d7d77200e85f6a34eeb600819f2e694"
+    }
+  ],
+  "files": {
+    "bin/libcrypto-3-x64.dll": "26c5c4804d14049dc50e7d1a7ba5fd479c1bcee3ae5c3942a7f069f5159a4745",
+    "bin/libssh.dll": "4e872f2b9329edfb3112c433a2c4c98efc915d0bca2b1b935a58e45e37ce0a3b",
+    "bin/libwinpthread-1.dll": "55cc37ec4ac551c472d029a5cd9ceadcfad5350c2a3c4c8f8a150be9c0e58864",
+    "bin/zlib1.dll": "93e9243a44c29200eeacaf9658efe2558581770e4b11ca4b500e18e424a6e3b5",
+    "include/libssh/callbacks.h": "86649064cc856e81025cd896fc739f5d9f2aa7c897136d30597dbed8e5bb1db7",
+    "include/libssh/legacy.h": "87f6c45b6a66b0acdd612ac2e4c0353acd755580e791e19493bb58d9e1de3b06",
+    "include/libssh/libssh.h": "a363d46440cbf4423933e9c5009452580bb1b3491289fc93016565b33e1af5d3",
+    "include/libssh/libssh_version.h": "5461704139a70a4a071b82d4a0c0b0f14286d9daafe0901b4b4b207f29b0b5e0",
+    "include/libssh/libsshpp.hpp": "6729a9a963aba16412f237cfe9574dbccd78a433220c0fdc02312cc2281886bb",
+    "include/libssh/server.h": "60f420f084ff5e61e06612b6e5bddef551b7a412b220af63278dd9c5072a09d9",
+    "include/libssh/sftp.h": "d8f13ba8534ae43df33866132a691560f0e6c767e06456db0103363a30f7eb53",
+    "include/libssh/sftpserver.h": "7b2dfdf793333b4fe1debb3e1c2590e5834300d43c8747795e1aacda668784df",
+    "include/libssh/ssh2.h": "7083cd649858833ca07504151ed7b8265e98430f29d7b925dce8fa01b1bd0dbc",
+    "lib/libssh.dll.a": "839c8434c27af855c415dec99be261272bc5e1e463e661de09c1a98c18044477",
+    "licenses/libssh-LGPL-2.1.txt": "1656186e951db1c010a8485481fa94587f7e53a26d24976bef97945ad0c4df5a",
+    "licenses/libwinpthread/COPYING": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177",
+    "licenses/openssl/LICENSE": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+    "licenses/zlib/LICENSE": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+  }
+}

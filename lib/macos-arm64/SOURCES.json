@@ -1,0 +1,25 @@
+{
+  "platform": "macOS arm64",
+  "minimum_macos": "26.0",
+  "libssh_version": "0.12.2",
+  "openssl_version": "OpenSSL 3.6.2 7 Apr 2026 (Library: OpenSSL 3.6.2 7 Apr 2026)",
+  "libssh_source_url": "https://www.libssh.org/files/0.12/libssh-0.12.2.tar.xz",
+  "libssh_source_sha256": "49560f677d96e3706a904ac2de1116e25f3680937d51e5c92198fcba4a1c1e9f",
+  "build": "AppleClang, Release; GSSAPI/server/SFTP/zlib/pcap/examples disabled",
+  "relocation": "libssh loads adjacent libcrypto.3.dylib via @loader_path; both libraries ad-hoc signed",
+  "files": {
+    ".DS_Store": "9d348821c9650bd199aa3d1010024912feb589f4501de4d191e159c04126a8f3",
+    "include/libssh/callbacks.h": "86649064cc856e81025cd896fc739f5d9f2aa7c897136d30597dbed8e5bb1db7",
+    "include/libssh/legacy.h": "87f6c45b6a66b0acdd612ac2e4c0353acd755580e791e19493bb58d9e1de3b06",
+    "include/libssh/libssh.h": "a363d46440cbf4423933e9c5009452580bb1b3491289fc93016565b33e1af5d3",
+    "include/libssh/libssh_version.h": "d0cda58ad49e0a9c69f191649df78e367355313cadc876a3b3c2c42813d72203",
+    "include/libssh/libsshpp.hpp": "6729a9a963aba16412f237cfe9574dbccd78a433220c0fdc02312cc2281886bb",
+    "include/libssh/ssh2.h": "7083cd649858833ca07504151ed7b8265e98430f29d7b925dce8fa01b1bd0dbc",
+    "lib/libcrypto.3.dylib": "00cec405286530f4c5142db0a2b4337b2841ea3bab2199aa15a630d44bd974b6",
+    "lib/libssh.4.12.0.dylib": "d8dc0de1238a13b459ebcebcd77aaac78f97756b66a97b1eb25c6f84429bf3e9",
+    "lib/libssh.4.dylib": "d8dc0de1238a13b459ebcebcd77aaac78f97756b66a97b1eb25c6f84429bf3e9",
+    "lib/libssh.dylib": "d8dc0de1238a13b459ebcebcd77aaac78f97756b66a97b1eb25c6f84429bf3e9",
+    "licenses/OpenSSL-Apache-2.0.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+    "licenses/libssh-LGPL-2.1.txt": "1656186e951db1c010a8485481fa94587f7e53a26d24976bef97945ad0c4df5a"
+  }
+}
