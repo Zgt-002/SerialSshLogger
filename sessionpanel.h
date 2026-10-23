@@ -53,6 +53,7 @@ private:
     QPushButton *m_start;
     QPushButton *m_stop;
     QLabel *m_status;
+    QLabel *m_received;
     QLabel *m_file;
     TerminalView *m_terminal;
     QThread *m_thread = nullptr;
