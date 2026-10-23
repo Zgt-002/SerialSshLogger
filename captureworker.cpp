@@ -45,6 +45,10 @@ bool CaptureWorker::beginCapture(const QString &prefix)
 void CaptureWorker::startSerial()
 {
     m_serial = new QSerialPort(this);
+    connect(m_serial, &QSerialPort::readyRead, this, [this] {
+        if (m_writer && !m_stopped)
+            receive(m_serial->readAll());
+    });
     m_serial->setPortName(m_options.serialPort);
     const bool configured = m_serial->setBaudRate(m_options.baudRate)
         && m_serial->setDataBits(QSerialPort::DataBits(m_options.dataBits))
@@ -52,19 +56,18 @@ void CaptureWorker::startSerial()
         && m_serial->setStopBits(QSerialPort::StopBits(m_options.stopBits))
         && m_serial->setFlowControl(QSerialPort::FlowControl(m_options.flowControl));
     if (!configured || !m_serial->open(QIODevice::ReadOnly)) {
-        fail(tr("串口打开失败：%1").arg(m_serial->errorString()));
+        fail(tr("串口打开失败（%1）：%2")
+                 .arg(int(m_serial->error())).arg(m_serial->errorString()));
         return;
     }
+    connect(m_serial, &QSerialPort::errorOccurred, this, [this](QSerialPort::SerialPortError error) {
+        if (error != QSerialPort::NoError)
+            fail(tr("串口接收失败（%1）：%2")
+                     .arg(int(error)).arg(m_serial->errorString()));
+    });
     if (!beginCapture("serial_" + m_options.serialPort))
         return;
-    connect(m_serial, &QSerialPort::readyRead, this, [this] {
-        receive(m_serial->readAll());
-    });
-    connect(m_serial, &QSerialPort::errorOccurred, this, [this](QSerialPort::SerialPortError error) {
-        if (error == QSerialPort::ResourceError || error == QSerialPort::ReadError
-            || error == QSerialPort::DeviceNotFoundError)
-            fail(tr("串口接收失败：%1").arg(m_serial->errorString()));
-    });
+    receive(m_serial->readAll());
 }
 
 void CaptureWorker::startSsh()
@@ -85,6 +88,7 @@ void CaptureWorker::startSsh()
         || ssh_options_set(m_session, SSH_OPTIONS_USER, user.constData()) != SSH_OK
         || ssh_options_set(m_session, SSH_OPTIONS_TIMEOUT, &timeout) != SSH_OK
         || ssh_options_set(m_session, SSH_OPTIONS_PROCESS_CONFIG, &processConfig) != SSH_OK
+        || ssh_options_set(m_session, SSH_OPTIONS_HOSTKEYS, "+ssh-rsa") != SSH_OK
         || ssh_options_set(m_session, SSH_OPTIONS_KNOWNHOSTS, knownHosts.constData()) != SSH_OK
         || ssh_options_set(m_session, SSH_OPTIONS_GLOBAL_KNOWNHOSTS, knownHosts.constData()) != SSH_OK) {
         fail(tr("SSH 配置失败：%1").arg(QString::fromUtf8(ssh_get_error(m_session))));
@@ -186,12 +190,12 @@ void CaptureWorker::receive(const QByteArray &data)
 {
     if (data.isEmpty() || !m_writer)
         return;
+    m_receivedBytes += data.size();
+    emit receivedBytesChanged(m_receivedBytes);
     const auto lines = m_terminal->feed(data, QDateTime::currentDateTime());
     QString completed;
     QString currentLine;
     for (const TerminalLine &line : lines) {
-        if (!m_writer->append(line))
-            return;
         if (line.complete)
             completed += line.text + QLatin1Char('\n');
         else
@@ -199,6 +203,10 @@ void CaptureWorker::receive(const QByteArray &data)
     }
     if (!lines.isEmpty())
         emit terminalUpdated(completed, currentLine);
+    for (const TerminalLine &line : lines) {
+        if (!m_writer->append(line))
+            return;
+    }
 }
 
 void CaptureWorker::sendInput(const QByteArray &data)

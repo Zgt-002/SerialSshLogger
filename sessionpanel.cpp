@@ -132,10 +132,13 @@ SessionPanel::SessionPanel(SourceKind kind, QWidget *parent) : QWidget(parent), 
     m_status->setWordWrap(true);
     m_status->setTextFormat(Qt::PlainText);
     m_status->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_received = new QLabel(tr("已接收：0 字节"));
+    m_received->setObjectName("receivedBytes");
     actions->addWidget(m_start);
     actions->addWidget(m_stop);
     actions->addSpacing(12);
     actions->addWidget(m_status, 1);
+    actions->addWidget(m_received);
     layout->addLayout(actions);
     m_file = new QLabel(tr("当前文件：—"));
     m_file->setObjectName("currentFile");
@@ -235,6 +238,7 @@ void SessionPanel::start()
     m_terminal->clear();
     m_status->setStyleSheet(QString());
     m_status->setText(tr("正在连接…"));
+    m_received->setText(tr("已接收：0 字节"));
     m_file->setText(tr("当前文件：—"));
     m_sourceGroup->setEnabled(false);
     m_directory->setEnabled(false);
@@ -254,6 +258,9 @@ void SessionPanel::start()
         m_file->setText(tr("当前文件：%1").arg(QDir::toNativeSeparators(path)));
     });
     connect(m_worker, &CaptureWorker::terminalUpdated, m_terminal, &TerminalView::updateTerminal);
+    connect(m_worker, &CaptureWorker::receivedBytesChanged, this, [this](qint64 bytes) {
+        m_received->setText(tr("已接收：%1 字节").arg(bytes));
+    });
     connect(m_worker, &CaptureWorker::connected, this, [this] {
         if (m_kind == SourceKind::Ssh && !m_stopping) {
             m_terminal->setInputEnabled(true);

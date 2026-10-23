@@ -50,6 +50,7 @@ signals:
     void errorOccurred(const QString &message);
     void fileChanged(const QString &path);
     void terminalUpdated(const QString &completed, const QString &currentLine);
+    void receivedBytesChanged(qint64 bytes);
     void hostKeyApprovalRequested(const QString &host, const QString &fingerprint);
     void connected();
     void finished();
@@ -72,6 +73,7 @@ private:
     ssh_session m_session = nullptr;
     ssh_channel m_channel = nullptr;
     QByteArray m_pendingInput;
+    qint64 m_receivedBytes = 0;
     bool m_waitingForHostKey = false;
     bool m_stopped = false;
 };
