@@ -47,6 +47,13 @@ void TerminalStream::applyCsi(QChar command)
         m_line.remove(m_column, count);
         m_dirty = true;
         break;
+    case 'X': {
+        const int end = int(qMin<qint64>(qint64(m_column) + count, m_line.size()));
+        for (int i = m_column; i < end; ++i)
+            m_line[i] = QLatin1Char(' ');
+        m_dirty = true;
+        break;
+    }
     default: break;
     }
 }
