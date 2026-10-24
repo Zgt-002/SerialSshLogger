@@ -1,6 +1,7 @@
 #pragma once
 
 #include "terminalstream.h"
+#include "terminalbuffer.h"
 
 #include <QObject>
 #include <libssh/libssh.h>
@@ -44,12 +45,13 @@ public slots:
     void sendInput(const QByteArray &data);
     void approveHostKey(bool approved);
     void setLogOptions(int intervalSeconds, bool timestamps);
+    void acknowledgeDisplay();
 
 signals:
     void statusChanged(const QString &message);
     void errorOccurred(const QString &message);
     void fileChanged(const QString &path);
-    void terminalUpdated(const QString &completed, const QString &currentLine);
+    void terminalUpdated(const QString &completed, const QString &currentLine, int cursor, bool reset);
     void receivedBytesChanged(qint64 bytes);
     void hostKeyApprovalRequested(const QString &host, const QString &fingerprint);
     void connected();
@@ -62,6 +64,7 @@ private:
     bool beginCapture(const QString &prefix);
     void pollSsh();
     void receive(const QByteArray &data);
+    void flushDisplay(bool force = false);
     void fail(const QString &message);
     bool interrupted() const;
 
@@ -70,6 +73,10 @@ private:
     LogWriter *m_writer = nullptr;
     QSerialPort *m_serial = nullptr;
     QTimer *m_pollTimer = nullptr;
+    QTimer *m_displayTimer = nullptr;
+    TerminalBuffer m_display;
+    bool m_displayInFlight = false;
+    qint64 m_displayedBytes = 0;
     ssh_session m_session = nullptr;
     ssh_channel m_channel = nullptr;
     QByteArray m_pendingInput;

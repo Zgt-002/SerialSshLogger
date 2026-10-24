@@ -2,8 +2,10 @@
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDir>
 #include <QMainWindow>
 #include <QMessageBox>
+#include <QSettings>
 #include <QTabWidget>
 #include <QTimer>
 
@@ -21,17 +23,28 @@ public:
         tabs->addTab(m_serial, QStringLiteral("串口"));
         tabs->addTab(m_ssh, "SSH");
         setCentralWidget(tabs);
-        for (SessionPanel *panel : {m_serial, m_ssh})
+        QSettings settings(QDir(QCoreApplication::applicationDirPath()).filePath("config.ini"),
+                           QSettings::IniFormat);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+        settings.setIniCodec("UTF-8");
+#endif
+        m_serial->loadSettings(settings);
+        m_ssh->loadSettings(settings);
+        resize(settings.value("window/size", size()).toSize());
+        for (SessionPanel *panel : {m_serial, m_ssh}) {
+            connect(panel, &SessionPanel::settingsSaveRequested, this, &MainWindow::saveSettings);
             connect(panel, &SessionPanel::stopped, this, [this] {
                 if (m_closing && !m_serial->isRunning() && !m_ssh->isRunning())
                     QTimer::singleShot(0, this, &QWidget::close);
             });
+        }
     }
 
 protected:
     void closeEvent(QCloseEvent *event) override
     {
         if (!m_serial->isRunning() && !m_ssh->isRunning()) {
+            saveSettings();
             event->accept();
             return;
         }
@@ -42,6 +55,23 @@ protected:
     }
 
 private:
+    void saveSettings()
+    {
+        QSettings settings(QDir(QCoreApplication::applicationDirPath()).filePath("config.ini"),
+                           QSettings::IniFormat);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+        settings.setIniCodec("UTF-8");
+#endif
+        m_serial->saveSettings(settings);
+        m_ssh->saveSettings(settings);
+        settings.setValue("window/size", isMaximized() ? normalGeometry().size() : size());
+        settings.sync();
+        if (settings.status() != QSettings::NoError)
+            QMessageBox::warning(this, QStringLiteral("参数保存失败"),
+                QStringLiteral("无法保存配置文件：\n%1\n\n请检查文件格式和目录写入权限。")
+                    .arg(QDir::toNativeSeparators(settings.fileName())));
+    }
+
     SessionPanel *m_serial;
     SessionPanel *m_ssh;
     bool m_closing = false;

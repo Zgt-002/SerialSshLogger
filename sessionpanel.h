@@ -11,6 +11,7 @@ class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QSettings;
 class QSpinBox;
 class QThread;
 class TerminalView;
@@ -22,15 +23,19 @@ public:
     explicit SessionPanel(SourceKind kind, QWidget *parent = nullptr);
     bool isRunning() const { return m_thread != nullptr; }
     void requestStop();
+    void loadSettings(QSettings &settings);
+    void saveSettings(QSettings &settings) const;
 
 signals:
     void stopped();
+    void settingsSaveRequested();
 
 private:
     void refreshPorts();
     void start();
     void updateLogOptions();
     int intervalSeconds() const;
+    QString serialPortName() const;
 
     SourceKind m_kind;
     QGroupBox *m_sourceGroup;
@@ -52,6 +57,7 @@ private:
     QCheckBox *m_timestamps;
     QPushButton *m_start;
     QPushButton *m_stop;
+    QPushButton *m_pause;
     QLabel *m_status;
     QLabel *m_received;
     QLabel *m_file;

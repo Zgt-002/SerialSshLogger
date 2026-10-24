@@ -74,6 +74,16 @@ bool LogWriter::append(const TerminalLine &line)
     m_line = line.text;
     m_receivedAt = line.receivedAt;
     m_dirty = true;
+    if (line.continued) {
+        // 超长行前段已不可编辑：固定文件偏移，但不增加换行或下一段时间戳。
+        if (!syncLine(false))
+            return false;
+        m_lineOffset = m_file.pos();
+        m_line.clear();
+        m_skip = 0;
+        m_lineTimestamp = false;
+        return true;
+    }
     if (line.complete)
         return syncLine(true);
     return true;

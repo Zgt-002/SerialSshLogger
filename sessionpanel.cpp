@@ -16,6 +16,7 @@
 #include <QPushButton>
 #include <QSerialPort>
 #include <QSerialPortInfo>
+#include <QSettings>
 #include <QSpinBox>
 #include <QThread>
 #include <QVBoxLayout>
@@ -31,6 +32,8 @@ SessionPanel::SessionPanel(SourceKind kind, QWidget *parent) : QWidget(parent), 
         m_serialPort->setObjectName("serialPort");
         m_serialPort->setEditable(true);
         m_serialPort->setMinimumWidth(170);
+        m_serialPort->setMinimumContentsLength(26);
+        m_serialPort->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         auto *refresh = new QPushButton(tr("刷新"));
         m_baud = new QComboBox;
         m_baud->setEditable(true);
@@ -147,12 +150,35 @@ SessionPanel::SessionPanel(SourceKind kind, QWidget *parent) : QWidget(parent), 
     m_file->setTextInteractionFlags(Qt::TextSelectableByMouse);
     layout->addWidget(m_file);
     m_terminal = new TerminalView;
+    auto *displayActions = new QHBoxLayout;
+    m_pause = new QPushButton(tr("暂停显示"));
+    m_pause->setObjectName("pauseDisplay");
+    m_pause->setCheckable(true);
+    m_pause->setToolTip(tr("仅冻结界面，接收和日志保存继续；恢复时显示缓存中的最新数据。"));
+    auto *clearDisplay = new QPushButton(tr("清空显示"));
+    clearDisplay->setObjectName("clearDisplay");
+    clearDisplay->setToolTip(tr("只清空界面，不清空日志文件或接收计数。"));
+    auto *autoScroll = new QCheckBox(tr("自动滚动"));
+    autoScroll->setObjectName("autoScroll");
+    autoScroll->setChecked(true);
+    displayActions->addWidget(m_pause);
+    displayActions->addWidget(clearDisplay);
+    displayActions->addWidget(autoScroll);
+    displayActions->addStretch();
+    layout->addLayout(displayActions);
     layout->addWidget(m_terminal, 1);
     auto *hint = new QLabel(kind == SourceKind::Serial
         ? tr("持续接收串口文本；分文件期间不中断接收。文件保存为 UTF-8。")
         : tr("点击终端直接输入；Ctrl+C 中断（有选中文字时复制），Ctrl+V 粘贴。文件保存终端文本，无方向标签。"));
     hint->setWordWrap(true);
     layout->addWidget(hint);
+
+    connect(m_pause, &QPushButton::toggled, this, [this](bool paused) {
+        m_pause->setText(paused ? tr("继续显示") : tr("暂停显示"));
+        m_terminal->setDisplayPaused(paused);
+    });
+    connect(clearDisplay, &QPushButton::clicked, m_terminal, &TerminalView::clearDisplay);
+    connect(autoScroll, &QCheckBox::toggled, m_terminal, &TerminalView::setAutoScroll);
 
     connect(m_browse, &QPushButton::clicked, this, [this] {
         const QString directory = QFileDialog::getExistingDirectory(this, tr("选择日志目录"),
@@ -174,16 +200,100 @@ SessionPanel::SessionPanel(SourceKind kind, QWidget *parent) : QWidget(parent), 
     });
 }
 
+void SessionPanel::loadSettings(QSettings &settings)
+{
+    settings.beginGroup(m_kind == SourceKind::Serial ? "serial" : "ssh");
+    const auto restoreChoice = [&settings](QComboBox *combo, const char *key) {
+        const int index = combo->findData(settings.value(key, combo->currentData()).toInt());
+        if (index >= 0)
+            combo->setCurrentIndex(index);
+    };
+    if (m_kind == SourceKind::Serial) {
+        const QString port = settings.value("port", serialPortName()).toString();
+        const int index = m_serialPort->findData(port);
+        if (index >= 0)
+            m_serialPort->setCurrentIndex(index);
+        else
+            m_serialPort->setCurrentText(port);
+        m_baud->setCurrentText(settings.value("baudRate", m_baud->currentText()).toString());
+        restoreChoice(m_dataBits, "dataBits");
+        restoreChoice(m_parity, "parity");
+        restoreChoice(m_stopBits, "stopBits");
+        restoreChoice(m_flow, "flowControl");
+    } else {
+        m_host->setText(settings.value("host", m_host->text()).toString());
+        m_sshPort->setValue(settings.value("port", m_sshPort->value()).toInt());
+        m_user->setText(settings.value("username", m_user->text()).toString());
+    }
+    m_directory->setText(settings.value("directory", m_directory->text()).toString());
+    m_interval->setValue(settings.value("interval", m_interval->value()).toInt());
+    restoreChoice(m_unit, "intervalUnitSeconds");
+    m_timestamps->setChecked(settings.value("timestamps", m_timestamps->isChecked()).toBool());
+    const int encoding = m_encoding->findData(
+        settings.value("encoding", m_encoding->currentData()).toByteArray());
+    if (encoding >= 0)
+        m_encoding->setCurrentIndex(encoding);
+    settings.endGroup();
+}
+
+void SessionPanel::saveSettings(QSettings &settings) const
+{
+    settings.beginGroup(m_kind == SourceKind::Serial ? "serial" : "ssh");
+    if (m_kind == SourceKind::Serial) {
+        settings.setValue("port", serialPortName());
+        settings.setValue("baudRate", m_baud->currentText().toInt());
+        settings.setValue("dataBits", m_dataBits->currentData());
+        settings.setValue("parity", m_parity->currentData());
+        settings.setValue("stopBits", m_stopBits->currentData());
+        settings.setValue("flowControl", m_flow->currentData());
+    } else {
+        settings.setValue("host", m_host->text().trimmed());
+        settings.setValue("port", m_sshPort->value());
+        settings.setValue("username", m_user->text().trimmed());
+    }
+    settings.setValue("directory", m_directory->text().trimmed());
+    settings.setValue("interval", m_interval->value());
+    settings.setValue("intervalUnitSeconds", m_unit->currentData());
+    settings.setValue("timestamps", m_timestamps->isChecked());
+    settings.setValue("encoding", QString::fromLatin1(m_encoding->currentData().toByteArray()));
+    settings.endGroup();
+}
+
+QString SessionPanel::serialPortName() const
+{
+    // 可编辑列表包含设备说明，连接和配置只能使用原始端口名。
+    const int index = m_serialPort->currentIndex();
+    if (index >= 0 && m_serialPort->currentText() == m_serialPort->itemText(index))
+        return m_serialPort->itemData(index).toString();
+    return m_serialPort->currentText().trimmed();
+}
+
 void SessionPanel::refreshPorts()
 {
-    const QString previous = m_serialPort->currentText();
+    const QString previous = serialPortName();
     m_serialPort->clear();
     for (const QSerialPortInfo &port : QSerialPortInfo::availablePorts()) {
-        m_serialPort->addItem(port.portName());
-        m_serialPort->setItemData(m_serialPort->count() - 1, port.description(), Qt::ToolTipRole);
+        QString label = port.portName();
+        if (!port.description().isEmpty())
+            label += QStringLiteral(" — ") + port.description();
+        if (!port.manufacturer().isEmpty())
+            label += QStringLiteral("（%1）").arg(port.manufacturer());
+        m_serialPort->addItem(label, port.portName());
+        QString details = tr("端口：%1\n设备：%2\n制造商：%3\n序列号：%4")
+            .arg(port.systemLocation(), port.description(), port.manufacturer(), port.serialNumber());
+        if (port.hasVendorIdentifier())
+            details += QStringLiteral("\nVID: %1").arg(port.vendorIdentifier(), 4, 16, QLatin1Char('0'));
+        if (port.hasProductIdentifier())
+            details += QStringLiteral("\nPID: %1").arg(port.productIdentifier(), 4, 16, QLatin1Char('0'));
+        m_serialPort->setItemData(m_serialPort->count() - 1, details, Qt::ToolTipRole);
     }
-    if (!previous.isEmpty())
-        m_serialPort->setCurrentText(previous);
+    if (!previous.isEmpty()) {
+        const int index = m_serialPort->findData(previous);
+        if (index >= 0)
+            m_serialPort->setCurrentIndex(index);
+        else
+            m_serialPort->setCurrentText(previous);
+    }
 }
 
 int SessionPanel::intervalSeconds() const
@@ -211,7 +321,7 @@ void SessionPanel::start()
         return;
     }
     if (m_kind == SourceKind::Serial) {
-        options.serialPort = m_serialPort->currentText().trimmed();
+        options.serialPort = serialPortName();
         options.baudRate = m_baud->currentText().toInt();
         options.dataBits = m_dataBits->currentData().toInt();
         options.parity = m_parity->currentData().toInt();
@@ -233,9 +343,11 @@ void SessionPanel::start()
         }
         m_password->clear();
     }
+    emit settingsSaveRequested();
     m_failed = false;
     m_stopping = false;
-    m_terminal->clear();
+    m_terminal->clearDisplay();
+    m_pause->setChecked(false);
     m_status->setStyleSheet(QString());
     m_status->setText(tr("正在连接…"));
     m_received->setText(tr("已接收：0 字节"));
@@ -258,6 +370,7 @@ void SessionPanel::start()
         m_file->setText(tr("当前文件：%1").arg(QDir::toNativeSeparators(path)));
     });
     connect(m_worker, &CaptureWorker::terminalUpdated, m_terminal, &TerminalView::updateTerminal);
+    connect(m_terminal, &TerminalView::displayConsumed, m_worker, &CaptureWorker::acknowledgeDisplay);
     connect(m_worker, &CaptureWorker::receivedBytesChanged, this, [this](qint64 bytes) {
         m_received->setText(tr("已接收：%1 字节").arg(bytes));
     });

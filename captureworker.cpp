@@ -37,6 +37,10 @@ bool CaptureWorker::beginCapture(const QString &prefix)
     if (!m_writer->start(m_options.directory, prefix, m_options.intervalSeconds,
                          m_options.timestamps))
         return false;
+    m_displayTimer = new QTimer(this);
+    m_displayTimer->setInterval(50);
+    connect(m_displayTimer, &QTimer::timeout, this, [this] { flushDisplay(); });
+    m_displayTimer->start();
     emit statusChanged(tr("已连接，正在记录"));
     emit connected();
     return true;
@@ -191,22 +195,47 @@ void CaptureWorker::receive(const QByteArray &data)
     if (data.isEmpty() || !m_writer)
         return;
     m_receivedBytes += data.size();
+    const QDateTime receivedAt = QDateTime::currentDateTime();
+    // 限制单次解码的临时结果大小，完整数据始终先进入日志通道。
+    for (int offset = 0; offset < data.size(); offset += 16384) {
+        const auto lines = m_terminal->feed(data.mid(offset, 16384), receivedAt);
+        QString completed;
+        QString currentLine;
+        for (const TerminalLine &line : lines) {
+            if (line.complete || line.continued)
+                completed += line.text + QLatin1Char('\n');
+            else
+                currentLine = line.text;
+        }
+        if (!lines.isEmpty()) {
+            const int cursor = m_terminal->cursorPosition();
+            // 远端可把光标移到行尾空白处；只给显示补空格，不把虚拟空白写入文件。
+            if (cursor > currentLine.size())
+                currentLine += QString(cursor - currentLine.size(), QLatin1Char(' '));
+            m_display.append(completed, currentLine, cursor);
+        }
+        for (const TerminalLine &line : lines)
+            if (!m_writer->append(line))
+                return;
+    }
+}
+
+void CaptureWorker::acknowledgeDisplay()
+{
+    m_displayInFlight = false;
+}
+
+void CaptureWorker::flushDisplay(bool force)
+{
+    // 最多保留一批尚未被界面接收的事件；界面忙时只更新有界尾部缓冲。
+    if ((!force && m_displayInFlight)
+        || (!m_display.dirty && m_displayedBytes == m_receivedBytes))
+        return;
+    m_displayInFlight = true;
+    emit terminalUpdated(m_display.completed, m_display.currentLine, m_display.cursor, m_display.reset);
+    m_display.consume();
+    m_displayedBytes = m_receivedBytes;
     emit receivedBytesChanged(m_receivedBytes);
-    const auto lines = m_terminal->feed(data, QDateTime::currentDateTime());
-    QString completed;
-    QString currentLine;
-    for (const TerminalLine &line : lines) {
-        if (line.complete)
-            completed += line.text + QLatin1Char('\n');
-        else
-            currentLine = line.text;
-    }
-    if (!lines.isEmpty())
-        emit terminalUpdated(completed, currentLine);
-    for (const TerminalLine &line : lines) {
-        if (!m_writer->append(line))
-            return;
-    }
 }
 
 void CaptureWorker::sendInput(const QByteArray &data)
@@ -280,6 +309,8 @@ void CaptureWorker::stop()
     m_stopped = true;
     if (m_pollTimer)
         m_pollTimer->stop();
+    if (m_displayTimer)
+        m_displayTimer->stop();
     if (m_serial && m_serial->isOpen()) {
         receive(m_serial->readAll());
         m_serial->close();
@@ -310,5 +341,7 @@ void CaptureWorker::stop()
     if (m_writer && !m_writer->finish())
         emit errorOccurred(m_writer->errorString());
     m_options.password.clear();
+    // 退出前补发最后一批，避免未等到 50 ms 就停止而丢失末尾的显示内容。
+    flushDisplay(true);
     emit finished();
 }

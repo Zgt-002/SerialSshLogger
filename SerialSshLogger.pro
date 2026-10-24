@@ -16,6 +16,7 @@ SOURCES += main.cpp \
     logwriter.cpp
 
 HEADERS += sessionpanel.h \
+    terminalbuffer.h \
     terminalview.h \
     captureworker.h \
     terminalstream.h \

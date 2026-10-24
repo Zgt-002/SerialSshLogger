@@ -16,6 +16,7 @@ SOURCES += test_logger.cpp \
     ../terminalview.cpp \
     ../sessionpanel.cpp
 HEADERS += ../terminalstream.h \
+    ../terminalbuffer.h \
     ../logwriter.h \
     ../captureworker.h \
     ../terminalview.h \

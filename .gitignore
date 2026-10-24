@@ -5,4 +5,5 @@
 dist/
 logs/
 known_hosts
+/config.ini
 *.pro.user*
