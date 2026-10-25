@@ -30,7 +30,7 @@ SessionPanel::SessionPanel(SourceKind kind, QWidget *parent) : QWidget(parent), 
     if (kind == SourceKind::Serial) {
         m_serialPort = new QComboBox;
         m_serialPort->setObjectName("serialPort");
-        m_serialPort->setEditable(true);
+        m_serialPort->setEditable(false);
         m_serialPort->setMinimumWidth(170);
         m_serialPort->setMinimumContentsLength(26);
         m_serialPort->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
@@ -211,10 +211,8 @@ void SessionPanel::loadSettings(QSettings &settings)
     if (m_kind == SourceKind::Serial) {
         const QString port = settings.value("port", serialPortName()).toString();
         const int index = m_serialPort->findData(port);
-        if (index >= 0)
-            m_serialPort->setCurrentIndex(index);
-        else
-            m_serialPort->setCurrentText(port);
+        // 保存的设备不在列表中时保持未选择，避免自动连接到其它串口。
+        m_serialPort->setCurrentIndex(index);
         m_baud->setCurrentText(settings.value("baudRate", m_baud->currentText()).toString());
         restoreChoice(m_dataBits, "dataBits");
         restoreChoice(m_parity, "parity");
@@ -261,11 +259,8 @@ void SessionPanel::saveSettings(QSettings &settings) const
 
 QString SessionPanel::serialPortName() const
 {
-    // 可编辑列表包含设备说明，连接和配置只能使用原始端口名。
-    const int index = m_serialPort->currentIndex();
-    if (index >= 0 && m_serialPort->currentText() == m_serialPort->itemText(index))
-        return m_serialPort->itemData(index).toString();
-    return m_serialPort->currentText().trimmed();
+    // 显示文字包含设备描述，连接和配置只读取列表项中的原始端口名。
+    return m_serialPort->currentData().toString();
 }
 
 void SessionPanel::refreshPorts()
@@ -275,9 +270,7 @@ void SessionPanel::refreshPorts()
     for (const QSerialPortInfo &port : QSerialPortInfo::availablePorts()) {
         QString label = port.portName();
         if (!port.description().isEmpty())
-            label += QStringLiteral(" — ") + port.description();
-        if (!port.manufacturer().isEmpty())
-            label += QStringLiteral("（%1）").arg(port.manufacturer());
+            label += QStringLiteral("(%1)").arg(port.description());
         m_serialPort->addItem(label, port.portName());
         QString details = tr("端口：%1\n设备：%2\n制造商：%3\n序列号：%4")
             .arg(port.systemLocation(), port.description(), port.manufacturer(), port.serialNumber());
@@ -287,13 +280,8 @@ void SessionPanel::refreshPorts()
             details += QStringLiteral("\nPID: %1").arg(port.productIdentifier(), 4, 16, QLatin1Char('0'));
         m_serialPort->setItemData(m_serialPort->count() - 1, details, Qt::ToolTipRole);
     }
-    if (!previous.isEmpty()) {
-        const int index = m_serialPort->findData(previous);
-        if (index >= 0)
-            m_serialPort->setCurrentIndex(index);
-        else
-            m_serialPort->setCurrentText(previous);
-    }
+    if (!previous.isEmpty())
+        m_serialPort->setCurrentIndex(m_serialPort->findData(previous));
 }
 
 int SessionPanel::intervalSeconds() const

@@ -374,17 +374,26 @@ private slots:
         SessionPanel serial(SourceKind::Serial);
         auto *ports = serial.findChild<QComboBox *>("serialPort");
         ports->clear();
-        ports->addItem(QStringLiteral("COM42 — USB-SERIAL CH340（WCH）"), "COM42");
+        ports->addItem(QStringLiteral("COM42(USB-SERIAL CH340)"), "COM42");
+        ports->addItem(QStringLiteral("COM99(USB Serial Port)"), "COM99");
+        QVERIFY(!ports->isEditable());
+        QTest::keyClick(ports, Qt::Key_Backspace);
+        QTest::keyClick(ports, Qt::Key_Delete);
+        QCOMPARE(ports->currentText(), QStringLiteral("COM42(USB-SERIAL CH340)"));
+        QCOMPARE(ports->count(), 2);
         serial.findChild<QLineEdit *>("logDirectory")->setText(QStringLiteral("D:/日志"));
         serial.saveSettings(settings);
         QCOMPARE(settings.value("serial/port").toString(), QString("COM42"));
-        ports->setEditText("COM99");
+        ports->setCurrentIndex(1);
         serial.saveSettings(settings);
         QCOMPARE(settings.value("serial/port").toString(), QString("COM99"));
         settings.setValue("serial/port", "COM42");
         serial.loadSettings(settings);
         QCOMPARE(ports->currentIndex(), 0);
         QVERIFY(ports->currentText().contains("CH340"));
+        settings.setValue("serial/port", "COM404");
+        serial.loadSettings(settings);
+        QCOMPARE(ports->currentIndex(), -1);
 
         SessionPanel ssh(SourceKind::Ssh);
         for (QLineEdit *edit : ssh.findChildren<QLineEdit *>())
@@ -436,7 +445,9 @@ private slots:
         SessionPanel panel(SourceKind::Serial);
         const QString path = directory("panel-reconnect");
         panel.findChild<QLineEdit *>("logDirectory")->setText(path);
-        panel.findChild<QComboBox *>("serialPort")->setCurrentText(QString::fromLocal8Bit(name));
+        auto *ports = panel.findChild<QComboBox *>("serialPort");
+        ports->addItem(QStringLiteral("PTY(Test serial device)"), QString::fromLocal8Bit(name));
+        ports->setCurrentIndex(ports->count() - 1);
         auto *start = panel.findChild<QPushButton *>("startCapture");
         auto *stop = panel.findChild<QPushButton *>("stopCapture");
         auto *status = panel.findChild<QLabel *>("captureStatus");
