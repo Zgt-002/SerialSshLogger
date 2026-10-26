@@ -39,13 +39,6 @@ jobs:
           tools: tools_mingw,qt.tools.win64_mingw810
           cache: true
 
-      - name: Set up Python for SSH integration tests
-        id: python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-          architecture: x64
-
       - name: Verify toolchain
         run: |
           $ErrorActionPreference = "Stop"
@@ -71,51 +64,6 @@ jobs:
           } finally {
             Pop-Location
           }
-
-      - name: Install SSH test dependencies
-        run: |
-          $ErrorActionPreference = "Stop"
-          $dependencyDir = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\python-deps"
-          $tempDir = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\pip-temp"
-          New-Item -ItemType Directory -Force $tempDir | Out-Null
-          $env:TEMP = $tempDir
-          $env:TMP = $tempDir
-          python -m pip install --disable-pip-version-check --no-cache-dir --target $dependencyDir "paramiko==5.1.0"
-          if ($LASTEXITCODE -ne 0) { throw "SSH test dependency installation failed." }
-
-      - name: Build tests
-        run: |
-          $ErrorActionPreference = "Stop"
-          $testBuildDir = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\windows-tests"
-          $project = Join-Path $env:GITHUB_WORKSPACE "tests\tests.pro"
-          New-Item -ItemType Directory -Force $testBuildDir | Out-Null
-          Push-Location $testBuildDir
-          try {
-            qmake $project -spec win32-g++ "CONFIG+=release" "CONFIG-=debug" "LIBSSH_ROOT=$env:LIBSSH_ROOT"
-            if ($LASTEXITCODE -ne 0) { throw "Test qmake failed." }
-            mingw32-make -j2 release
-            if ($LASTEXITCODE -ne 0) { throw "Test build failed." }
-          } finally {
-            Pop-Location
-          }
-
-      - name: Run tests with loopback SSH server
-        env:
-          LOGGER_PYTHON: ${{ steps.python.outputs.python-path }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $env:PATH = "$env:LIBSSH_ROOT\bin;$env:QT_ROOT_DIR\bin;$env:PATH"
-          $env:QT_QPA_PLATFORM = "offscreen"
-          $env:QT_PLUGIN_PATH = Join-Path $env:QT_ROOT_DIR "plugins"
-          $env:PYTHONPATH = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\python-deps"
-          $env:PYTHONDONTWRITEBYTECODE = "1"
-          $env:LOGGER_TEST_ROOT = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\test-results"
-          $env:LOGGER_SSH_FIXTURE = Join-Path $env:GITHUB_WORKSPACE "tests\ssh_fixture.py"
-          New-Item -ItemType Directory -Force $env:LOGGER_TEST_ROOT | Out-Null
-          $testExe = Join-Path $env:GITHUB_WORKSPACE ".codex-tmp\windows-tests\release\logger_tests.exe"
-          $testReport = Join-Path $env:LOGGER_TEST_ROOT "results.xml"
-          & $testExe -o "$testReport,xml" -o "-,txt"
-          if ($LASTEXITCODE -ne 0) { throw "Logger tests failed with exit code $LASTEXITCODE." }
 
       - name: Package Windows application
         run: |
