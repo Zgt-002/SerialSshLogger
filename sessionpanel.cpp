@@ -208,17 +208,7 @@ void SessionPanel::loadSettings(QSettings &settings)
         if (index >= 0)
             combo->setCurrentIndex(index);
     };
-    if (m_kind == SourceKind::Serial) {
-        const QString port = settings.value("port", serialPortName()).toString();
-        const int index = m_serialPort->findData(port);
-        // 保存的设备不在列表中时保持未选择，避免自动连接到其它串口。
-        m_serialPort->setCurrentIndex(index);
-        m_baud->setCurrentText(settings.value("baudRate", m_baud->currentText()).toString());
-        restoreChoice(m_dataBits, "dataBits");
-        restoreChoice(m_parity, "parity");
-        restoreChoice(m_stopBits, "stopBits");
-        restoreChoice(m_flow, "flowControl");
-    } else {
+    if (m_kind == SourceKind::Ssh) {
         m_host->setText(settings.value("host", m_host->text()).toString());
         m_sshPort->setValue(settings.value("port", m_sshPort->value()).toInt());
         m_user->setText(settings.value("username", m_user->text()).toString());
@@ -238,12 +228,9 @@ void SessionPanel::saveSettings(QSettings &settings) const
 {
     settings.beginGroup(m_kind == SourceKind::Serial ? "serial" : "ssh");
     if (m_kind == SourceKind::Serial) {
-        settings.setValue("port", serialPortName());
-        settings.setValue("baudRate", m_baud->currentText().toInt());
-        settings.setValue("dataBits", m_dataBits->currentData());
-        settings.setValue("parity", m_parity->currentData());
-        settings.setValue("stopBits", m_stopBits->currentData());
-        settings.setValue("flowControl", m_flow->currentData());
+        // 清理旧版留下的连接参数，日志选项仍继续保存。
+        for (const char *key : {"port", "baudRate", "dataBits", "parity", "stopBits", "flowControl"})
+            settings.remove(key);
     } else {
         settings.setValue("host", m_host->text().trimmed());
         settings.setValue("port", m_sshPort->value());

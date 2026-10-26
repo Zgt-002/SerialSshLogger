@@ -80,7 +80,9 @@ bool LogWriter::append(const TerminalLine &line)
             return false;
         m_lineOffset = m_file.pos();
         m_line.clear();
-        m_skip = 0;
+        m_parts.clear();
+        m_currentBytes.clear();
+        m_currentUnits = 0;
         m_lineTimestamp = false;
         return true;
     }
@@ -93,30 +95,75 @@ bool LogWriter::syncLine(bool complete)
 {
     if (!m_dirty)
         return true;
-    QString text = m_line.mid(m_skip);
-    if (m_lineTimestamp && (!text.isEmpty() || complete))
+    int start = 0;
+    bool timestampPending = m_lineTimestamp;
+    for (int index = 0; index < m_parts.size();) {
+        LinePart &part = m_parts[index];
+        int end = qMin(start + part.units, int(m_line.size()));
+        // 编辑后字符宽度可能改变，文件边界不能切开 UTF-16 代理对。
+        if (end > start && end < m_line.size() && m_line.at(end).isLowSurrogate()
+            && m_line.at(end - 1).isHighSurrogate())
+            --end;
+        QString text = m_line.mid(start, end - start);
+        if (timestampPending && !text.isEmpty()) {
+            text.prepend(m_receivedAt.toString("[yyyy-MM-dd HH:mm:ss.zzz] "));
+            timestampPending = false;
+        }
+        const QByteArray bytes = text.toUtf8();
+        if (bytes != part.bytes) {
+            // 已切换的文件只重写当前行尾部，保留其中的完整历史行。
+            QFile file(part.path);
+            if (!file.open(QIODevice::ReadWrite | QIODevice::ExistingOnly))
+                return fail(tr("无法更新跨文件日志：%1\n%2").arg(part.path, file.errorString()));
+            if (!rewrite(file, part.offset, bytes))
+                return false;
+            if (!file.flush())
+                return fail(tr("日志刷新失败：%1\n%2").arg(part.path, file.errorString()));
+        }
+        part.units = end - start;
+        part.bytes = bytes;
+        start = end;
+        // 已删空的片段不再占据边界，之后的新输入进入当前文件。
+        if (part.units == 0)
+            m_parts.removeAt(index);
+        else
+            ++index;
+    }
+    QString text = m_line.mid(start);
+    if (timestampPending && (!text.isEmpty() || complete))
         text.prepend(m_receivedAt.toString("[yyyy-MM-dd HH:mm:ss.zzz] "));
     if (complete)
         text.append(QLatin1Char('\n'));
     const QByteArray bytes = text.toUtf8();
-    if (!m_file.seek(m_lineOffset))
-        return fail(tr("日志文件定位失败：%1").arg(m_file.errorString()));
-    qint64 written = 0;
-    while (written < bytes.size()) {
-        const qint64 count = m_file.write(bytes.constData() + written, bytes.size() - written);
-        if (count <= 0)
-            return fail(tr("日志写入失败：%1").arg(m_file.errorString()));
-        written += count;
-    }
-    if (!m_file.resize(m_file.pos()))
-        return fail(tr("日志文件更新失败：%1").arg(m_file.errorString()));
+    if (!rewrite(m_file, m_lineOffset, bytes))
+        return false;
+    m_currentUnits = m_line.size() - start;
+    m_currentBytes = bytes;
     m_dirty = false;
     if (complete) {
         m_lineOffset = m_file.pos();
         m_line.clear();
-        m_skip = 0;
+        m_parts.clear();
+        m_currentBytes.clear();
+        m_currentUnits = 0;
         m_hasLine = false;
     }
+    return true;
+}
+
+bool LogWriter::rewrite(QFile &file, qint64 offset, const QByteArray &bytes)
+{
+    if (!file.seek(offset))
+        return fail(tr("日志文件定位失败：%1\n%2").arg(file.fileName(), file.errorString()));
+    qint64 written = 0;
+    while (written < bytes.size()) {
+        const qint64 count = file.write(bytes.constData() + written, bytes.size() - written);
+        if (count <= 0)
+            return fail(tr("日志写入失败：%1\n%2").arg(file.fileName(), file.errorString()));
+        written += count;
+    }
+    if (!file.resize(file.pos()))
+        return fail(tr("日志文件更新失败：%1\n%2").arg(file.fileName(), file.errorString()));
     return true;
 }
 
@@ -131,9 +178,11 @@ void LogWriter::tick()
         return;
     }
     if (m_rotationClock.elapsed() >= m_intervalMs) {
+        if (m_currentUnits > 0)
+            m_parts.append({m_file.fileName(), m_lineOffset, m_currentUnits, m_currentBytes});
         m_file.close();
-        m_skip = m_line.size();
-        m_lineTimestamp = m_timestamps;
+        m_currentUnits = 0;
+        m_currentBytes.clear();
         openNext();
     }
 }

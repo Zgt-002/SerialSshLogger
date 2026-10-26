@@ -318,12 +318,19 @@ void CaptureWorker::stop()
     if (m_channel) {
         if (m_writer) {
             char buffer[16384];
+            // 固定停止时两路可读数据的范围，排空已有缓冲且不追赶持续输出。
+            const int available[] = {ssh_channel_poll(m_channel, 0), ssh_channel_poll(m_channel, 1)};
             for (int stream = 0; stream < 2; ++stream) {
-                for (int i = 0; i < 64; ++i) {
+                int remaining = qMax(0, available[stream]);
+                while (remaining > 0) {
                     const int count = ssh_channel_read_nonblocking(m_channel, buffer,
-                                                                   sizeof(buffer), stream);
-                    if (count <= 0)
+                        uint32_t(qMin(remaining, int(sizeof(buffer)))), stream);
+                    if (count <= 0) {
+                        emit errorOccurred(tr("SSH 停止时未能读完已缓冲的数据：%1")
+                            .arg(QString::fromUtf8(ssh_get_error(m_session))));
                         break;
+                    }
+                    remaining -= count;
                     receive(QByteArray(buffer, count));
                 }
             }

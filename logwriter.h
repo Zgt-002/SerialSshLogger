@@ -25,8 +25,16 @@ signals:
     void failed(const QString &message);
 
 private:
+    struct LinePart {
+        QString path;
+        qint64 offset;
+        int units;
+        QByteArray bytes;
+    };
+
     bool openNext();
     bool syncLine(bool complete);
+    bool rewrite(QFile &file, qint64 offset, const QByteArray &bytes);
     bool fail(const QString &message);
     void tick();
 
@@ -38,9 +46,12 @@ private:
     QString m_error;
     QString m_line;
     QDateTime m_receivedAt;
+    // 只保留尚可编辑的当前行；已完成行及超长行固定前段不再追踪。
+    QVector<LinePart> m_parts;
+    QByteArray m_currentBytes;
     qint64 m_lineOffset = 0;
     qint64 m_intervalMs = 600000;
-    int m_skip = 0;
+    int m_currentUnits = 0;
     bool m_timestamps = false;
     bool m_lineTimestamp = false;
     bool m_hasLine = false;

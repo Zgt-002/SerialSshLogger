@@ -58,6 +58,7 @@ signals:
     void finished();
 
 private:
+    friend class LoggerTests;
     void startSerial();
     void startSsh();
     void authenticate();

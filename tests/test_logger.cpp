@@ -5,14 +5,17 @@
 #include "terminalview.h"
 
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDir>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
 #include <QProcess>
 #include <QPushButton>
+#include <QSerialPort>
 #include <QSignalSpy>
 #include <QSettings>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTextCodec>
@@ -213,6 +216,109 @@ private slots:
                  QByteArray("first line\n[2026-10-23 14:30:01.125] second\n"));
     }
 
+    void rotationPreservesEdits_data()
+    {
+        QTest::addColumn<bool>("timestamps");
+        QTest::newRow("without-timestamps") << false;
+        QTest::newRow("with-timestamps") << true;
+    }
+
+    void rotationPreservesEdits()
+    {
+        QFETCH(bool, timestamps);
+        LogWriter writer;
+        QSignalSpy files(&writer, &LogWriter::fileChanged);
+        QVERIFY(writer.start(directory("rotation-edit"), "ssh", 1, timestamps));
+        TerminalStream stream;
+        for (const auto &line : stream.feed("history\r\nabc", m_time))
+            QVERIFY(writer.append(line));
+        QTRY_VERIFY_WITH_TIMEOUT(files.size() >= 2, 2000);
+        writer.setOptions(600, timestamps);
+        // 先修改已切走的片段，再删短并刷新，最后继续输入，验证各阶段实际文件内容。
+        for (const auto &line : stream.feed("\bX", m_time))
+            QVERIFY(writer.append(line));
+        const QByteArray prefix = timestamps ? "[2026-10-23 14:30:01.125] " : "";
+        QTRY_COMPARE_WITH_TIMEOUT(read(files[0][0].toString()),
+            prefix + "history\n" + prefix + "abX", 1000);
+        for (const auto &line : stream.feed("\b\x1b[K", m_time))
+            QVERIFY(writer.append(line));
+        QTRY_COMPARE_WITH_TIMEOUT(read(files[0][0].toString()),
+            prefix + "history\n" + prefix + "ab", 1000);
+        for (const auto &line : stream.feed("XYZ\r\nnext\r\n", m_time))
+            QVERIFY(writer.append(line));
+        QVERIFY(writer.finish());
+        QCOMPARE(read(files[1][0].toString()), QByteArray("XYZ\n") + prefix + "next\n");
+    }
+
+    void editsAcrossMultipleFilesAndUnicodeBoundary()
+    {
+        LogWriter writer;
+        QSignalSpy files(&writer, &LogWriter::fileChanged);
+        QVERIFY(writer.start(directory("rotation-unicode"), "ssh", 1, true));
+        TerminalStream stream;
+        for (const auto &line : stream.feed("history\r\nX", m_time))
+            QVERIFY(writer.append(line));
+        QTRY_VERIFY_WITH_TIMEOUT(files.size() >= 2, 2000);
+        for (const auto &line : stream.feed("YZ", m_time))
+            QVERIFY(writer.append(line));
+        QTRY_VERIFY_WITH_TIMEOUT(files.size() >= 3, 2000);
+        // 空闲时仍需创建新文件，且不能重复记录当前提示行。
+        QTRY_VERIFY_WITH_TIMEOUT(files.size() >= 4, 2000);
+        writer.setOptions(600, false);
+        const QString replacement = QStringLiteral("\U00020000中");
+        for (const auto &line : stream.feed("\r\x1b[K" + replacement.toUtf8() + "\r\nnext\r\n", m_time))
+            QVERIFY(writer.append(line));
+        QVERIFY(writer.finish());
+        QByteArray joined;
+        for (const auto &file : files) {
+            const QByteArray bytes = read(file[0].toString());
+            // 每个文件都必须是完整 UTF-8，不能在原先的单字符边界拆开代理对。
+            QCOMPARE(QString::fromUtf8(bytes).toUtf8(), bytes);
+            joined += bytes;
+        }
+        QCOMPARE(joined, QByteArray("[2026-10-23 14:30:01.125] history\n"
+                                   "[2026-10-23 14:30:01.125] ")
+                         + replacement.toUtf8() + "\nnext\n");
+    }
+
+    void rotationAndLongLineContinuation()
+    {
+        LogWriter writer;
+        QSignalSpy files(&writer, &LogWriter::fileChanged);
+        QVERIFY(writer.start(directory("rotation-long-line"), "ssh", 1, true));
+        TerminalStream stream;
+        for (const auto &line : stream.feed("abc", m_time))
+            QVERIFY(writer.append(line));
+        QTRY_VERIFY_WITH_TIMEOUT(files.size() >= 2, 2000);
+        writer.setOptions(600, true);
+        const QByteArray tail = QByteArray(TerminalLimits::LineColumns * 2, 'x') + "\r\n";
+        for (const auto &line : stream.feed(tail, m_time))
+            QVERIFY(writer.append(line));
+        QVERIFY(writer.finish());
+        QByteArray joined;
+        for (const auto &file : files)
+            joined += read(file[0].toString());
+        QCOMPARE(joined, QByteArray("[2026-10-23 14:30:01.125] abc")
+                         + QByteArray(TerminalLimits::LineColumns * 2, 'x') + '\n');
+    }
+
+    void missingPreviousFileStopsEditing()
+    {
+        LogWriter writer;
+        QSignalSpy files(&writer, &LogWriter::fileChanged);
+        QSignalSpy errors(&writer, &LogWriter::failed);
+        QVERIFY(writer.start(directory("rotation-missing-file"), "ssh", 1, false));
+        QVERIFY(writer.append({"abc", m_time, false}));
+        QTRY_VERIFY_WITH_TIMEOUT(files.size() >= 2, 2000);
+        const QString previous = files[0][0].toString();
+        QVERIFY(QFile::rename(previous, previous + ".moved"));
+        QVERIFY(!writer.append({"abX", m_time, true}));
+        QCOMPARE(errors.size(), 1);
+        QVERIFY(!writer.finish());
+        QVERIFY(!QFile::exists(previous));
+        QCOMPARE(read(previous + ".moved"), QByteArray("abc"));
+    }
+
     void invalidDirectoryDoesNotOverwriteFile()
     {
         const QString path = directory("failure") + "/existing.txt";
@@ -368,7 +474,7 @@ private slots:
         QVERIFY(view.toPlainText().endsWith("399"));
     }
 
-    void settingsPreservePortIdentityAndExcludePassword()
+    void settingsExcludeSerialConnectionAndPassword()
     {
         QSettings settings(directory("settings") + "/config.ini", QSettings::IniFormat);
         SessionPanel serial(SourceKind::Serial);
@@ -381,19 +487,30 @@ private slots:
         QTest::keyClick(ports, Qt::Key_Delete);
         QCOMPARE(ports->currentText(), QStringLiteral("COM42(USB-SERIAL CH340)"));
         QCOMPARE(ports->count(), 2);
-        serial.findChild<QLineEdit *>("logDirectory")->setText(QStringLiteral("D:/日志"));
-        serial.saveSettings(settings);
-        QCOMPARE(settings.value("serial/port").toString(), QString("COM42"));
         ports->setCurrentIndex(1);
+        const auto choices = serial.findChildren<QComboBox *>();
+        QStringList defaults;
+        for (auto *choice : choices)
+            defaults.append(choice->currentText());
+        const QStringList keys = {"port", "baudRate", "dataBits", "parity", "stopBits", "flowControl"};
+        const QVariantList oldValues = {"COM404", 9600, 5, int(QSerialPort::EvenParity),
+                                        int(QSerialPort::TwoStop), int(QSerialPort::HardwareControl)};
+        for (int i = 0; i < keys.size(); ++i)
+            settings.setValue("serial/" + keys[i], oldValues[i]);
+        serial.loadSettings(settings);
+        for (int i = 0; i < choices.size(); ++i)
+            QCOMPARE(choices[i]->currentText(), defaults[i]);
+        serial.findChild<QLineEdit *>("logDirectory")->setText(QStringLiteral("D:/日志"));
+        serial.findChild<QSpinBox *>("rotationInterval")->setValue(7);
+        serial.findChild<QCheckBox *>("timestamps")->setChecked(true);
         serial.saveSettings(settings);
-        QCOMPARE(settings.value("serial/port").toString(), QString("COM99"));
-        settings.setValue("serial/port", "COM42");
-        serial.loadSettings(settings);
-        QCOMPARE(ports->currentIndex(), 0);
-        QVERIFY(ports->currentText().contains("CH340"));
-        settings.setValue("serial/port", "COM404");
-        serial.loadSettings(settings);
-        QCOMPARE(ports->currentIndex(), -1);
+        for (const auto &key : keys)
+            QVERIFY(!settings.contains("serial/" + key));
+        SessionPanel restored(SourceKind::Serial);
+        restored.loadSettings(settings);
+        QCOMPARE(restored.findChild<QLineEdit *>("logDirectory")->text(), QStringLiteral("D:/日志"));
+        QCOMPARE(restored.findChild<QSpinBox *>("rotationInterval")->value(), 7);
+        QVERIFY(restored.findChild<QCheckBox *>("timestamps")->isChecked());
 
         SessionPanel ssh(SourceKind::Ssh);
         for (QLineEdit *edit : ssh.findChildren<QLineEdit *>())
@@ -592,6 +709,74 @@ private slots:
         QCOMPARE(done.count(), 1);
         QVERIFY(!QFile::exists(options.knownHostsPath));
         QVERIFY(QDir(options.directory).entryList({"*.log"}, QDir::Files).isEmpty());
+    }
+
+    void sshStopDrainsBufferedBurst_data()
+    {
+        QTest::addColumn<int>("stream");
+        QTest::addColumn<bool>("continuous");
+        QTest::newRow("stdout") << 0 << false;
+        QTest::newRow("stderr") << 1 << false;
+        QTest::newRow("continuous-stdout") << 0 << true;
+    }
+
+    void sshStopDrainsBufferedBurst()
+    {
+        if (qEnvironmentVariableIsEmpty("LOGGER_PYTHON"))
+            QSKIP("SSH fixture is not configured.");
+        QFETCH(int, stream);
+        QFETCH(bool, continuous);
+        const int port = startServer();
+        QVERIFY2(port > 0, m_server.readAllStandardError().constData());
+        CaptureWorker worker(sshOptions(port, directory("ssh-stop-burst")));
+        connect(&worker, &CaptureWorker::hostKeyApprovalRequested, &worker,
+                [&worker](const QString &, const QString &) { worker.approveHostKey(true); });
+        QSignalSpy errors(&worker, &CaptureWorker::errorOccurred);
+        QSignalSpy files(&worker, &CaptureWorker::fileChanged);
+        QSignalSpy done(&worker, &CaptureWorker::finished);
+        worker.start();
+        QCOMPARE(files.size(), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(read(files[0][0].toString()), QByteArray("device# "), 2000);
+        const qint64 initialSize = read(files[0][0].toString()).size();
+        // 暂停正常轮询，只让 libssh 收包，确保停止时已有超过旧上限的本地缓冲。
+        worker.m_pollTimer->stop();
+        const QByteArray command = continuous ? "flood" : (stream == 0 ? "burst" : "burst-stderr");
+        worker.sendInput(command + '\r');
+        const QByteArray block = QByteArray(4095, 'x') + '\n';
+        const QByteArray payload = block.repeated(384);
+        const int minimum = payload.size() + (stream == 0 ? command.size() + 2 : 0);
+        QElapsedTimer receiveTime;
+        receiveTime.start();
+        int buffered = 0;
+        while (receiveTime.elapsed() < 5000) {
+            buffered = ssh_channel_poll(worker.m_channel, stream);
+            if (buffered >= minimum || buffered == SSH_ERROR)
+                break;
+            QTest::qWait(1);
+        }
+        if (buffered < minimum)
+            worker.stop();
+        QVERIFY2(buffered >= minimum, qPrintable(QString("Buffered %1 bytes, expected at least %2")
+                                                .arg(buffered).arg(minimum)));
+        const qint64 before = worker.m_receivedBytes;
+        QElapsedTimer stopTime;
+        stopTime.start();
+        worker.stop();
+        QVERIFY(stopTime.elapsed() < 10000);
+        QCOMPARE(done.size(), 1);
+        QCOMPARE(errors.size(), 0);
+        const QByteArray bytes = read(files[0][0].toString());
+        const QByteArray prefix = "device# " + command + '\n';
+        if (continuous) {
+            QVERIFY(bytes.startsWith(prefix));
+            const QByteArray output = bytes.mid(prefix.size());
+            QVERIFY(output.size() >= payload.size());
+            QCOMPARE(output, block.repeated((output.size() + block.size() - 1) / block.size())
+                                .left(output.size()));
+            // 命令回显中的 CRLF 规范为 LF，其余压力数据无需转换。
+            QCOMPARE(qint64(bytes.size()), initialSize + worker.m_receivedBytes - before - 1);
+        } else
+            QCOMPARE(bytes, prefix + payload);
     }
 
     void sshAuthenticationFailure()

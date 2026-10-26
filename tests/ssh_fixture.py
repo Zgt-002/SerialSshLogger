@@ -70,6 +70,18 @@ def main():
                                 channel.send_exit_status(0)
                                 channel.close()
                                 return
+                            if command in (b"burst", b"burst-stderr", b"flood"):
+                                block = b"x" * 4095 + b"\n"
+                                if command == b"burst-stderr":
+                                    channel.sendall_stderr(block * 384)
+                                elif command == b"flood":
+                                    # 持续输出直到客户端关闭，验证停止流程不会追赶新数据。
+                                    while True:
+                                        channel.sendall(block)
+                                else:
+                                    channel.sendall(block * 384)
+                                command.clear()
+                                continue
                             channel.sendall(b"result: " + command + b"\r\ndevice# ")
                             command.clear()
                         else:
